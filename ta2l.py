@@ -50,6 +50,25 @@ X_train = df_train.drop(['ID','TARGET'], axis=1).values
 id_test = df_test['ID']
 X_test = df_test.drop(['ID'], axis=1).values
 
+X_merge = np.concatenate((X_train, X_test), axis=0)
+sep = X_train.shape[0]
+
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.feature_selection import GenericUnivariateSelect
+from sklearn.feature_selection import chi2
+# Scale features to range [0, 1]
+scale = MinMaxScaler()
+X_merge = scale.fit_transform(X_merge)
+
+X_train = X_merge[:sep]
+X_test = X_merge[sep:]
+
+# Choose top features as ranked by chi squared test
+gus = GenericUnivariateSelect(score_func=chi2, mode="k_best", param=150)
+gus.fit(X_train, y_train)
+X_train = gus.transform(X_train)
+X_test = gus.transform(X_test)
+
 # length of dataset
 len_train = len(X_train)
 len_test  = len(X_test)
