@@ -19,32 +19,35 @@ from sklearn.svm import OneClassSVM
 
 def main():
     X_train, y_train, X_test, id_test = init()
-    X_train, X_test = preprocess(X_train, y_train, X_test)
+    #X_train, X_test = preprocess(X_train, y_train, X_test)
+    #split_data = split_data_types(X_train, X_test)
+    #X_train_cont, X_train_disc, X_test_cont, X_test_disc = split_data
+
+    from sklearn.cross_validation import train_test_split
+    X_train1, X_train2, y_train1, y_train2 = train_test_split(X_train,\
+        y_train, test_size=0.4)
 
     # classifier
     clf = xgb.XGBClassifier(missing=np.nan, max_depth=5, n_estimators=350,\
         learning_rate=0.03, nthread=4, subsample=0.95, colsample_bytree=0.85,\
         seed=4242)
 
-    X_fit, X_eval, y_fit, y_eval= train_test_split(X_train, y_train,\
+    X_fit, X_eval, y_fit, y_eval= train_test_split(X_train1, y_train1,\
         test_size=0.3)
 
     # fitting
     print("== Training Classifier ==")
-    clf.fit(X_train, y_train, early_stopping_rounds=20, eval_metric="auc",\
+    clf.fit(X_train1, y_train1, early_stopping_rounds=20, eval_metric="auc",\
         eval_set=[(X_eval, y_eval)])
 
     auc = roc_auc_score(y_train, clf.predict_proba(X_train)[:,1])
     print('Overall AUC:', auc)
 
-    # predicting
-    y_pred= clf.predict_proba(X_test)[:,1]
-
+    y_pred = clf.predict_proba(X_test)[:,1]
     submission = pd.DataFrame({"ID":id_test, "TARGET":y_pred})
     submission.to_csv("submission.csv", index=False)
 
     print('Completed!')
-
 
 def init():
     archfile = 'archive.pckl'
@@ -89,8 +92,49 @@ def load_data():
 
     id_test = df_test['ID']
     X_test = df_test.drop(['ID'], axis=1).values
+    
+    cols = df_train.columns
+    for i in range(len(cols)):
+        if cols[i] == 'var15':
+            print(i)
+            break
 
     return X_train, y_train, X_test, id_test
+
+def split_data_types(X_train, X_test):
+    print("== Splitting Continuous and Discrete ==")
+    col_is_cont = [False]*X_train.shape[1]
+    for c in range(X_train.shape[1]):
+        for i in range(X_train.shape[0]):
+            if int(X_train[i, c]) != X_train[i, c]:
+                col_is_cont[c] = True
+                break
+    for c in range(X_test.shape[1]):
+        if col_is_cont[c]:
+            continue
+        for i in range(X_test.shape[0]):
+            if int(X_test[i, c]) != X_test[i, c]:
+                col_is_cont[c] = True
+                break
+
+    X_train_cont = np.ndarray(shape=(X_train.shape[0], sum(col_is_cont)),\
+            dtype=np.float64)
+    X_train_disc = np.ndarray(shape=(X_train.shape[0], len(col_is_cont) -\
+            sum(col_is_cont)), dtype=np.float64)
+
+    X_test_cont = np.ndarray(shape=(X_train.shape[0], sum(col_is_cont)),\
+            dtype=np.float64)
+    X_test_disc = np.ndarray(shape=(X_train.shape[0], len(col_is_cont) -\
+            sum(col_is_cont)), dtype=np.float64)
+    for c in col_is_cont:
+        if col_is_cont[c]:
+            X_train_cont[:,c] = X_train[:,c]
+            X_test_cont[:,c] = X_train[:,c]
+        else:
+            X_train_disc[:,c] = X_train[:,c]
+            X_test_disc[:,c] = X_train[:,c]
+
+    return X_train_cont, X_train_disc, X_test_cont, X_
 
 def preprocess(X_train, y_train, X_test):
     print("== Preprocessing Data ==")
