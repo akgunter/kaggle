@@ -20,8 +20,8 @@ from sklearn.svm import OneClassSVM
 def main():
     X_train, y_train, X_test, id_test = init()
     #X_train, X_test = preprocess(X_train, y_train, X_test)
-    #split_data = split_data_types(X_train, X_test)
-    #X_train_cont, X_train_disc, X_test_cont, X_test_disc = split_data
+    split_data = split_data_types(X_train, X_test)
+    X_train_cont, X_train_disc, X_test_cont, X_test_disc = split_data
 
     from sklearn.cross_validation import train_test_split
     X_train1, X_train2, y_train1, y_train2 = train_test_split(X_train,\
@@ -103,6 +103,8 @@ def load_data():
 
 def split_data_types(X_train, X_test):
     print("== Splitting Continuous and Discrete ==")
+
+    # Find continuous columns
     col_is_cont = [False]*X_train.shape[1]
     for c in range(X_train.shape[1]):
         for i in range(X_train.shape[0]):
@@ -117,6 +119,7 @@ def split_data_types(X_train, X_test):
                 col_is_cont[c] = True
                 break
 
+    # Create new ndarray for each case
     X_train_cont = np.ndarray(shape=(X_train.shape[0], sum(col_is_cont)),\
             dtype=np.float64)
     X_train_disc = np.ndarray(shape=(X_train.shape[0], len(col_is_cont) -\
@@ -126,15 +129,21 @@ def split_data_types(X_train, X_test):
             dtype=np.float64)
     X_test_disc = np.ndarray(shape=(X_train.shape[0], len(col_is_cont) -\
             sum(col_is_cont)), dtype=np.float64)
-    for c in col_is_cont:
-        if col_is_cont[c]:
-            X_train_cont[:,c] = X_train[:,c]
-            X_test_cont[:,c] = X_train[:,c]
-        else:
-            X_train_disc[:,c] = X_train[:,c]
-            X_test_disc[:,c] = X_train[:,c]
 
-    return X_train_cont, X_train_disc, X_test_cont, X_
+    # Copy columns appropriately
+    c_idx = 0
+    d_idx = 0
+    for c in range(len(col_is_cont)):
+        if col_is_cont[c]:
+            X_train_cont[:,c_idx] = X_train[:,c]
+            X_test_cont[:,c_idx] = X_train[:,c]
+            c_idx += 1
+        else:
+            X_train_disc[:,d_idx] = X_train[:,c]
+            X_test_disc[:,d_idx] = X_train[:,c]
+            d_idx += 1
+
+    return X_train_cont, X_train_disc, X_test_cont, X_test_disc
 
 def preprocess(X_train, y_train, X_test):
     print("== Preprocessing Data ==")
