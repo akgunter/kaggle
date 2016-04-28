@@ -8,81 +8,137 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import xgboost as xgb
-
-from scipy.stats import entropy
-from scipy.stats import norm
-
 from sklearn.preprocessing import MinMaxScaler
+from sklearn.naive_bayes import GaussianNB
+from sklearn.naive_bayes import BernoulliNB
 from sklearn.feature_selection import GenericUnivariateSelect
 from sklearn.feature_selection import chi2
 from sklearn.cross_validation import train_test_split
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import roc_auc_score
 from sklearn.pipeline import Pipeline
 from sklearn.svm import OneClassSVM
+from sklearn.ensemble import VotingClassifier
 
+from sklearn.base import BaseEstimator
+from sklearn.base import ClassifierMixin
+import numpy as np
+import operator
+
+tst = 0
+tst2 = 0
+
+class VotingClassifier(BaseEstimator, ClassifierMixin):
+    def __init__(self, classifiers, weights=None):
+        self.clfs = classifiers
+        self.weights = weights
+
+    def fit(self, arg_arr):
+        pairs = zip(self.clfs, arg_arr)
+        for clf, args in pairs:
+            clf.fit(**args)
+
+    def predict(self, X):
+        #pairs = zip(self.clfs, arg_arr)
+
+        #self.classes_ = np.asarray([clf.predict(**args) for clf, args in pairs])
+        self.classes_ = np.asarray([clf.predict(X) for clf in self.clfs])
+        if self.weights:
+            avg = self.predict_proba(X)
+
+            majority = np.apply_along_axis(lambda x: max(enumerate(x), key=operator.itemgetter(1))[0], axis=1, arr=avg)
+
+        else:
+            majority = np.asarray([np.argmax(np.bincount(self.classes_[:,c])) for c in range(self.classes_.shape[1])])
+
+        return majority
+
+    def predict_proba(self, X):
+        def vote(t):
+            global tst
+            from collections import defaultdict
+            count = Counter()
+            for i in range(len(t)):
+                val = 0 if t[i][0] > t[i][1] else 1
+                count[val] += self.weights[i]
+            #dist = Counter(map(lambda x: 0 if x[0] >= x[1] else 1, t))
+            vote = count.most_common(1)[0][0]
+            #np.asarray(np.max())
+            if vote:
+                global tst
+                tst += 1
+                out = max(t, key=lambda x: x[1])
+            else:
+                out = min(t, key=lambda x: x[1])
+
+            return out
+
+        #pairs = zip(self.clfs, arg_arr)
+
+        #self.probas_ = [clf.predict_proba(X) for clf, args in pairs]
+        probs = [clf.predict_proba(X) for clf in self.clfs]
+        self.probas_ = zip(*probs)
+        
+        #majority = np.asarray(map(vote, self.probas_))
+        majority = np.asarray([vote(x) for x in self.probas_])
+        return majority
 
 def main():
-    archive = init()
-    X_train = archive[0]
-    X_train_cont = archive[1]
-    X_train_disc = archive[2]
-    y_train = archive[3]
-    X_test = archive[4]
-    X_test_cont = archive[5]
-    X_test_disc = archive[6]
-    id_test = archive[7]
-
+    X_train, y_train, X_test, id_test = init()
     #X_train, X_test = preprocess(X_train, y_train, X_test)
+    #split_data = split_data_types(X_train, X_test)
+    #X_train_cont, X_train_disc, X_test_cont, X_test_disc = split_data
 
-    print("== Calculating KL Divergence ==")
-    kl_arr_disc = kl_diverge(X_train_disc, y_train, cont=False)
-    kl_arr_cont = kl_diverge(X_train_cont, y_train)
+    X_train, X_valid, y_train, y_valid = train_test_split(X_train,\
+        y_train, test_size=0.3)
 
-    kl_arr_disc = list(sorted(map(lambda k: k / max(kl_arr_disc), kl_arr_disc)))
-    kl_arr_cont = list(sorted(map(lambda k: k / max(kl_arr_cont), kl_arr_cont)))
-
-    left = - int(max(len(kl_arr_disc), len(kl_arr_cont)) * 0.05)
-    right = max(len(kl_arr_disc), len(kl_arr_cont)) - left
-    bottom = kl_arr_disc[0] - kl_arr_disc[-1]/20
-    top = kl_arr_disc[-1] * 1.05
-    plt.axis([left, right, bottom, top])
-    ax = plt.gca()
-    ax.set_autoscale_on(False)
-    plt.plot(kl_arr_disc)
-    plt.plot(kl_arr_cont)
-    plt.show()
-    #kl_map = sorted(zip(kl_arr, range(len(kl_arr))), reverse=True)
-    #print(list(map(lambda k: k[0], kl_map)))
-    '''
-    plt.plot(list(map(lambda k: k[0], kl_map)))
-    plt.ylabel("KL Divergence")
-    plt.show()
-    '''
-
-    '''
     # classifier
     clf = xgb.XGBClassifier(missing=np.nan, max_depth=5, n_estimators=350,\
-        learning_rate=0.03, nthread=4, subsample=0.95, colsample_bytree=0.85,\
-        seed=4242)
+       learning_rate=0.03, nthread=4, subsample=0.95, colsample_bytree=0.85)
 
-    X_fit, X_eval, y_fit, y_eval= train_test_split(X_train1, y_train1,\
+    X_fit, X_eval, y_fit, y_eval= train_test_split(X_train, y_train,\
         test_size=0.3)
 
     # fitting
     print("== Training Classifier ==")
-    clf.fit(X_train1, y_train1, early_stopping_rounds=20, eval_metric="auc",\
-        eval_set=[(X_eval, y_eval)])
+    fit_args = [
+            #{
+            #    'X': X_train,
+            #    'y': y_train,
+            #    #'early_stopping_rounds': 20,
+            #    'eval_metric': "auc",
+            #    'eval_set': [(X_eval, y_eval)]
+            #},
+            #{'X': X_train, 'y': y_train},
+            #{'X': X_train, 'y': y_train},
+            {'X': X_train, 'y': y_train}
+    ]
+    # clf = clf.fit(X_train1, y_train1, early_stopping_rounds=20, eval_metric="auc",\
+    #    eval_set=[(X_eval, y_eval)])
 
-    auc = roc_auc_score(y_train, clf.predict_proba(X_train)[:,1])
+    clf2 = LogisticRegression(penalty='l1', class_weight='balanced', random_state=1, n_jobs=4)
+    clf3 = RandomForestClassifier(random_state=1, n_jobs=4)
+    clf4 = BernoulliNB(alpha=10) 
+
+    #eclf = VotingClassifier(classifiers=[clf, clf2, clf3, clf4], weights=[1,1,2,1])
+    eclf = VotingClassifier(classifiers=[clf3], weights=[1])
+    eclf.fit(fit_args)
+
+    #eclf.predict(X_test)
+    global tst
+    tst = 0
+    auc = roc_auc_score(y_valid, eclf.predict_proba(X_valid)[:,1])
+    print(tst)
     print('Overall AUC:', auc)
 
-    y_pred = clf.predict_proba(X_test)[:,1]
+    tst = 0
+    y_pred = eclf.predict_proba(X_test)[:,1]
+    print(tst)
     submission = pd.DataFrame({"ID":id_test, "TARGET":y_pred})
     submission.to_csv("submission.csv", index=False)
 
     print('Completed!')
-    '''
 
 def init():
     archfile = 'archive.pckl'
@@ -92,20 +148,6 @@ def init():
     else:
         print("== Loading Data ==")
         archive = load_data()
-        X_train = archive[0]
-        X_test = archive[2]
-        split_data = split_data_types(X_train, X_test)
-        X_train_cont, X_train_disc, X_test_cont, X_test_disc = split_data
-        archive = (
-            X_train,
-            X_train_cont,
-            X_train_disc,
-            archive[1],
-            X_test,
-            X_test_cont,
-            X_test_disc,
-            archive[3]
-        )
         pickle.dump(archive, open(archfile, 'wb'))
 
     return archive
@@ -141,6 +183,12 @@ def load_data():
 
     id_test = df_test['ID']
     X_test = df_test.drop(['ID'], axis=1).values
+    
+    cols = df_train.columns
+    for i in range(len(cols)):
+        if cols[i] == 'var15':
+            print(i)
+            break
 
     return X_train, y_train, X_test, id_test
 
@@ -207,84 +255,6 @@ def preprocess(X_train, y_train, X_test):
     X_test = gus.transform(X_test)
 
     return X_train, X_test
-
-def kl_diverge(X_train, y_train, cont=True):
-    num_0 = sum(map(lambda y: not y, y_train))
-    num_1 = sum(y_train)
-    X_0 = np.ndarray(shape=(num_0, X_train.shape[1]), dtype=np.float64)
-    X_1 = np.ndarray(shape=(num_1, X_train.shape[1]), dtype=np.float64)
-
-    idx_0 = 0
-    idx_1 = 0
-    for i in range(y_train.shape[0]):
-        if not y_train[i]:
-            X_0[idx_0, :] = X_train[i, :]
-            idx_0 += 1
-        else:
-            X_1[idx_1, :] = X_train[i, :]
-            idx_1 += 1
-
-    kl_arr = [0] * X_train.shape[1]
-    max_kl = 0
-
-    if cont:
-        for i in range(X_train.shape[1]):
-            col_0 = list(sorted(map(lambda r: r[i], X_0)))
-            col_1 = list(sorted(map(lambda r: r[i], X_1)))
-
-            left = min(col_0[0], col_1[0])
-            right = max(col_0[-1], col_1[-1])
-            domain = np.linspace(left, right, 1000)
-
-            t0 = norm(*norm.fit(col_0))
-            t1 = norm(*norm.fit(col_1))
-
-            kl0 = entropy(t1.pdf(domain), t0.pdf(domain))
-            kl1 = entropy(t0.pdf(domain), t1.pdf(domain))
-
-            if kl0 < np.inf and kl1 < np.inf:
-                if max(kl0, kl1) > max_kl:
-                    max_kl = max(kl0, kl1)
-            elif kl0 < np.inf and kl0 > max_kl:
-                max_kl = kl0
-            elif kl1 < np.inf and kl1 > max_kl:
-                max_kl = kl1
-
-            kl_arr[i] = (kl0, kl1)
-    else:
-        for i in range(X_train.shape[1]):
-            col_0 = Counter(map(lambda r: r[i], X_0))
-            col_1 = Counter(map(lambda r: r[i], X_1))
-
-            domain = set(col_0) | set(col_1)
-            pk = list(sorted(map(lambda c: col_0[c] / sum(col_0.values()),\
-                domain)))
-            qk = list(sorted(map(lambda c: col_1[c] / sum(col_1.values()),\
-                domain)))
-
-            kl0 = entropy(qk, pk)
-            kl1 = entropy(pk, qk)
-
-            if kl0 < np.inf and kl1 < np.inf:
-                if max(kl0, kl1) > max_kl:
-                    max_kl = max(kl0, kl1)
-            elif kl0 < np.inf and kl0 > max_kl:
-                max_kl = kl0
-            elif kl1 < np.inf and kl1 > max_kl:
-                max_kl = kl1
-
-            kl_arr[i] = (kl0, kl1)
-
-    for i in range(len(kl_arr)):
-        a, b = kl_arr[i]
-        if a == np.inf:
-            a = max_kl * 10
-        if b == np.inf:
-            b = max_kl * 10
-
-        kl_arr[i] = np.mean([a, b])
-
-    return kl_arr
 
 
 if __name__ == '__main__':
