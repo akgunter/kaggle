@@ -236,42 +236,44 @@ def kl_diverge(X_train, y_train, cont=True):
             right = max(col_0[-1], col_1[-1])
             domain = np.linspace(left, right, 1000)
 
-            t1 = norm(*norm.fit(col_0))
-            t2 = norm(*norm.fit(col_1))
+            t0 = norm(*norm.fit(col_0))
+            t1 = norm(*norm.fit(col_1))
 
-            kl1 = entropy(t2.pdf(domain), t1.pdf(domain))
-            kl2 = entropy(t1.pdf(domain), t2.pdf(domain))
+            kl0 = entropy(t1.pdf(domain), t0.pdf(domain))
+            kl1 = entropy(t0.pdf(domain), t1.pdf(domain))
 
-            if kl1 < np.inf and kl2 < np.inf:
-                if max(kl1, kl2) > max_kl:
-                    max_kl = max(kl1, kl2)
+            if kl0 < np.inf and kl1 < np.inf:
+                if max(kl0, kl1) > max_kl:
+                    max_kl = max(kl0, kl1)
+            elif kl0 < np.inf and kl0 > max_kl:
+                max_kl = kl0
             elif kl1 < np.inf and kl1 > max_kl:
                 max_kl = kl1
-            elif kl2 < np.inf and kl2 > max_kl:
-                max_kl = kl2
 
-            kl_arr[i] = (kl1, kl2)
+            kl_arr[i] = (kl0, kl1)
     else:
         for i in range(X_train.shape[1]):
             col_0 = Counter(map(lambda r: r[i], X_0))
             col_1 = Counter(map(lambda r: r[i], X_1))
 
             domain = set(col_0) | set(col_1)
-            pk = list(sorted(map(lambda c: col_0[c] / sum(col_0.values()), domain)))
-            qk = list(sorted(map(lambda c: col_1[c] / sum(col_1.values()), domain)))
+            pk = list(sorted(map(lambda c: col_0[c] / sum(col_0.values()),\
+                domain)))
+            qk = list(sorted(map(lambda c: col_1[c] / sum(col_1.values()),\
+                domain)))
 
-            kl1 = entropy(qk, pk)
-            kl2 = entropy(pk, qk)
+            kl0 = entropy(qk, pk)
+            kl1 = entropy(pk, qk)
 
-            if kl1 < np.inf and kl2 < np.inf:
-                if max(kl1, kl2) > max_kl:
-                    max_kl = max(kl1, kl2)
+            if kl0 < np.inf and kl1 < np.inf:
+                if max(kl0, kl1) > max_kl:
+                    max_kl = max(kl0, kl1)
+            elif kl0 < np.inf and kl0 > max_kl:
+                max_kl = kl0
             elif kl1 < np.inf and kl1 > max_kl:
                 max_kl = kl1
-            elif kl2 < np.inf and kl2 > max_kl:
-                max_kl = kl2
 
-            kl_arr[i] = (kl1, kl2)
+            kl_arr[i] = (kl0, kl1)
 
     for i in range(len(kl_arr)):
         a, b = kl_arr[i]
