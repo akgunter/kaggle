@@ -1,3 +1,4 @@
+import operator
 import os
 import pickle
 from collections import Counter
@@ -23,12 +24,12 @@ from sklearn.metrics import roc_auc_score
 from sklearn.pipeline import Pipeline
 from sklearn.svm import OneClassSVM
 from sklearn.ensemble import VotingClassifier
-
 from sklearn.base import BaseEstimator
 from sklearn.base import ClassifierMixin
-import numpy as np
-import operator
 
+
+tst = 0
+tst2 = 0
 
 class VotingClassifier(BaseEstimator, ClassifierMixin):
     def __init__(self, classifiers, weights=None):
@@ -141,6 +142,7 @@ def main():
     submission.to_csv("submission.csv", index=False)
 
     print('Completed!')
+
 
 def kl_init():
     archfile = 'kl_archive.pckl'
@@ -347,7 +349,7 @@ def kl_diverge(X_train, y_train, c_cols, d_cols):
         kl_arr[i] = np.mean([kl0, kl1])
 
     return kl_arr
-    
+
 
 if __name__ == '__main__':
     main()
