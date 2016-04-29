@@ -29,7 +29,6 @@ from sklearn.base import ClassifierMixin
 
 
 tst = 0
-tst2 = 0
 
 class VotingClassifier(BaseEstimator, ClassifierMixin):
     def __init__(self, classifiers, weights=None):
@@ -42,17 +41,16 @@ class VotingClassifier(BaseEstimator, ClassifierMixin):
             clf.fit(**args)
 
     def predict(self, X):
-        #pairs = zip(self.clfs, arg_arr)
-
-        #self.classes_ = np.asarray([clf.predict(**args) for clf, args in pairs])
         self.classes_ = np.asarray([clf.predict(X) for clf in self.clfs])
         if self.weights:
             avg = self.predict_proba(X)
 
-            majority = np.apply_along_axis(lambda x: max(enumerate(x), key=operator.itemgetter(1))[0], axis=1, arr=avg)
+            majority = np.apply_along_axis(lambda x: max(enumerate(x),\
+                key=operator.itemgetter(1))[0], axis=1, arr=avg)
 
         else:
-            majority = np.asarray([np.argmax(np.bincount(self.classes_[:,c])) for c in range(self.classes_.shape[1])])
+            majority = np.asarray([np.argmax(np.bincount(self.classes_[:,c]))\
+                for c in range(self.classes_.shape[1])])
 
         return majority
 
@@ -64,9 +62,7 @@ class VotingClassifier(BaseEstimator, ClassifierMixin):
             for i in range(len(t)):
                 val = 0 if t[i][0] > t[i][1] else 1
                 count[val] += self.weights[i]
-            #dist = Counter(map(lambda x: 0 if x[0] >= x[1] else 1, t))
             vote = count.most_common(1)[0][0]
-            #np.asarray(np.max())
             if vote:
                 global tst
                 tst += 1
@@ -76,68 +72,89 @@ class VotingClassifier(BaseEstimator, ClassifierMixin):
 
             return out
 
-        #pairs = zip(self.clfs, arg_arr)
-
-        #self.probas_ = [clf.predict_proba(X) for clf, args in pairs]
         probs = [clf.predict_proba(X) for clf in self.clfs]
         self.probas_ = zip(*probs)
-        
-        #majority = np.asarray(map(vote, self.probas_))
         majority = np.asarray([vote(x) for x in self.probas_])
+
         return majority
 
 
 def main():
-    X_train, y_train, X_test, id_test = init()
+    #X_train, y_train, X_test, id_test = init()
+
+    kl_archive = kl_init()
+    X_train = kl_archive[0]
+    y_train = kl_archive[1]
+    X_test = kl_archive[2]
+    id_test = kl_archive[3]
+    c_cols = kl_archive[4]
+    d_cols = kl_archive[5]
+    kl_arr = kl_archive[6]
+
+    X_train, X_test, kl_map = kl_filter(X_train, X_test, kl_arr, n=(0, 80))
     #X_train, X_test = preprocess(X_train, y_train, X_test)
-    #split_data = split_data_types(X_train, X_test)
-    #X_train_cont, X_train_disc, X_test_cont, X_test_disc = split_data
 
-    X_train, X_valid, y_train, y_valid = train_test_split(X_train,\
+    X_fit, X_valid, y_fit, y_valid = train_test_split(X_train,\
         y_train, test_size=0.3)
-
-    # classifier
-    clf = xgb.XGBClassifier(missing=np.nan, max_depth=5, n_estimators=350,\
-       learning_rate=0.03, nthread=4, subsample=0.95, colsample_bytree=0.85)
-
-    X_fit, X_eval, y_fit, y_eval= train_test_split(X_train, y_train,\
+    X_fit, X_eval, y_fit, y_eval= train_test_split(X_fit, y_fit,\
         test_size=0.3)
+
+    # classifiers
+    xgb_clf = xgb.XGBClassifier(missing=np.nan, max_depth=5, n_estimators=1000,\
+        learning_rate=0.03, nthread=4, subsample=0.95, colsample_bytree=0.85,\
+        silent=True)
+    lr_clf = LogisticRegression(penalty='l1', class_weight='balanced',\
+        random_state=1, n_jobs=4)
+    rf_clf = RandomForestClassifier(random_state=1, n_jobs=4)
+    bnb_clf = BernoulliNB(alpha=10) 
+
+    eclf = VotingClassifier(classifiers=[xgb_clf, lr_clf, rf_clf, bnb_clf],\
+        weights=[1,1,2,1])
+    #eclf = VotingClassifier(classifiers=[xgb_clf], weights=[1])
 
     # fitting
     print("== Training Classifier ==")
+    '''
     fit_args = [
-            #{
-            #    'X': X_train,
-            #    'y': y_train,
-            #    #'early_stopping_rounds': 20,
-            #    'eval_metric': "auc",
-            #    'eval_set': [(X_eval, y_eval)]
-            #},
-            #{'X': X_train, 'y': y_train},
-            #{'X': X_train, 'y': y_train},
-            {'X': X_train, 'y': y_train}
+            {
+                'X': X_fit,
+                'y': y_fit,
+                'early_stopping_rounds': 100,
+                'eval_metric': "auc",
+                'eval_set': [(X_eval, y_eval)]
+            },
+            {'X': X_fit, 'y': y_fit},
+            {'X': X_fit, 'y': y_fit},
+            {'X': X_fit, 'y': y_fit}
     ]
-    # clf = clf.fit(X_train1, y_train1, early_stopping_rounds=20, eval_metric="auc",\
-    #    eval_set=[(X_eval, y_eval)])
 
-    clf2 = LogisticRegression(penalty='l1', class_weight='balanced', random_state=1, n_jobs=4)
-    clf3 = RandomForestClassifier(random_state=1, n_jobs=4)
-    clf4 = BernoulliNB(alpha=10) 
-
-    #eclf = VotingClassifier(classifiers=[clf, clf2, clf3, clf4], weights=[1,1,2,1])
-    eclf = VotingClassifier(classifiers=[clf3], weights=[1])
     eclf.fit(fit_args)
 
-    #eclf.predict(X_test)
     global tst
     tst = 0
     auc = roc_auc_score(y_valid, eclf.predict_proba(X_valid)[:,1])
-    print(tst)
-    print('Overall AUC:', auc)
+    print("Validation Class 1 count:", tst, "out of", X_valid.shape[0])
+    print('Validation AUC:', auc)
+    '''
+    
+    fit_args = [
+            {
+                'X': X_train,
+                'y': y_train,
+                'early_stopping_rounds': 100,
+                'eval_metric': "auc",
+                'eval_set': [(X_eval, y_eval)]
+            },
+            {'X': X_train, 'y': y_train},
+            {'X': X_train, 'y': y_train},
+            {'X': X_train, 'y': y_train}
+    ]
+
+    eclf.fit(fit_args)
 
     tst = 0
     y_pred = eclf.predict_proba(X_test)[:,1]
-    print(tst)
+    print("Testing Class 1 count:", tst, "out of", len(y_pred))
     submission = pd.DataFrame({"ID":id_test, "TARGET":y_pred})
     submission.to_csv("submission.csv", index=False)
 
@@ -265,6 +282,28 @@ def preprocess(X_train, y_train, X_test):
 
     return X_train, X_test
 
+def kl_filter(X_train, X_test, kl_arr, n=50):
+    if type(n) == int:
+        l = 0
+        r = n
+    elif type(n) == tuple or type(n) == list:
+        l = min(n)
+        r = max(n)
+
+    print("== Reducing Features ==")
+    kl_map = list(sorted(zip(kl_arr, range(len(kl_arr))), reverse=True))
+    X_train_fil = np.ndarray(shape=(X_train.shape[0], r-l), dtype=np.float64)
+    X_test_fil = np.ndarray(shape=(X_test.shape[0], r-l), dtype=np.float64)
+
+    f_idx = 0
+    for i in range(l, r):
+        idx = kl_map[i][1]
+        X_train_fil[:,f_idx] = X_train[:,idx]
+        X_test_fil[:,f_idx] = X_test[:,idx]
+        f_idx += 1
+
+    return X_train_fil, X_test_fil, kl_map
+
 def kl_diverge(X_train, y_train, c_cols, d_cols):
     # Separate data matrix into Class 0 and Class 1 matrices
     num_0 = sum(map(lambda y: not y, y_train))
@@ -294,13 +333,15 @@ def kl_diverge(X_train, y_train, c_cols, d_cols):
         col_0 = list(sorted(map(lambda r: r[i], X_0)))
         col_1 = list(sorted(map(lambda r: r[i], X_1)))
 
-        # Determine 1000 values to compare
+        # Get 1000 evenly spaced values from the observed domain
         left = min(col_0[0], col_1[0])
         right = max(col_0[-1], col_1[-1])
         domain = np.linspace(left, right, 1000)
 
-        # If a column is always c for a class, then gaussian_kde() fails
-        # In such cases, use a uniform distribution for the class
+        # Estimate feature's distributions using Gaussian Kernel Density
+        # Estimation. If a feature is constant for a class, use a so-called
+        # "finite delta function" for its distribution. (Pr(x) = 1 for x == c
+        # and Pr(x) = 0 for x != c)
         elem_0 = set(col_0)
         elem_1 = set(col_1)
         if len(elem_0) == 1:
