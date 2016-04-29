@@ -39,6 +39,9 @@ def main():
     kl_arr_disc = kl_diverge(X_train_disc, y_train, cont=False)
     kl_arr_cont = kl_diverge(X_train_cont, y_train)
 
+    kl_data = (kl_arr_disc, kl_arr_cont)
+    pickle.dump(kl_data, open("kl_data.pckl", 'wb'))
+
     kl_arr_disc = list(sorted(map(lambda k: k / max(kl_arr_disc), kl_arr_disc)))
     kl_arr_cont = list(sorted(map(lambda k: k / max(kl_arr_cont), kl_arr_cont)))
 
@@ -208,6 +211,8 @@ def preprocess(X_train, y_train, X_test):
 
     return X_train, X_test
 
+from scipy.stats import gaussian_kde
+from scipy.stats import uniform
 def kl_diverge(X_train, y_train, cont=True):
     num_0 = sum(map(lambda y: not y, y_train))
     num_1 = sum(y_train)
@@ -228,7 +233,10 @@ def kl_diverge(X_train, y_train, cont=True):
     max_kl = 0
 
     if cont:
+        from numpy.linalg.linalg import LinAlgError
         for i in range(X_train.shape[1]):
+            col_0 = X_0[:,i]
+            col_1 = X_1[:,i]
             col_0 = list(sorted(map(lambda r: r[i], X_0)))
             col_1 = list(sorted(map(lambda r: r[i], X_1)))
 
@@ -236,19 +244,47 @@ def kl_diverge(X_train, y_train, cont=True):
             right = max(col_0[-1], col_1[-1])
             domain = np.linspace(left, right, 1000)
 
-            t0 = norm(*norm.fit(col_0))
-            t1 = norm(*norm.fit(col_1))
+            elem_0 = set(col_0)
+            elem_1 = set(col_1)
+            if len(elem_0) == 1:
+                pk = list(map(lambda x: 1 if x in elem_0 else 0, domain))
+            else:
+                t0 = gaussian_kde(col_0)
+                pk = t0.pdf(domain)
 
-            kl0 = entropy(t1.pdf(domain), t0.pdf(domain))
-            kl1 = entropy(t0.pdf(domain), t1.pdf(domain))
+            if len(elem_1) == 1:
+                qk = list(map(lambda x: 1 if x in elem_1 else 0, domain))
+            else:
+                t1 = gaussian_kde(col_1)
+                qk = t1.pdf(domain)
+            print("%d of %d" % (i, X_train.shape[1]))
 
+            pk = list(map(lambda k: 1e-300 if k < 1e-300 else k, pk))
+            qk = list(map(lambda k: 1e-300 if k < 1e-300 else k, qk))
+
+            kl0 = entropy(qk, pk)
+            kl1 = entropy(pk, qk)
+
+            '''
+            from math import log
             if kl0 < np.inf and kl1 < np.inf:
                 if max(kl0, kl1) > max_kl:
                     max_kl = max(kl0, kl1)
-            elif kl0 < np.inf and kl0 > max_kl:
-                max_kl = kl0
-            elif kl1 < np.inf and kl1 > max_kl:
-                max_kl = kl1
+            else:
+                if kl0 < np.inf and kl0 > max_kl:
+                    max_kl = kl0
+                    print(sum(map(lambda t: t[0] * log(t[0] / t[1]), zip(pk, qk))))
+                    print("kl0")
+                    #print("inf")
+                if kl1 < np.inf and kl1 > max_kl:
+                    max_kl = kl1
+                    #print(sum(map(lambda t: t[1] * log(t[1] / t[0]), zip(pk, qk))))
+                    arr = list(map(lambda t: t[1] / t[0], zip(pk, qk)))
+                    idx = arr.index(np.inf)
+                    print(pk[idx], qk[idx], arr[idx])
+                    print("kl1")
+                    #print("inf")
+            '''
 
             kl_arr[i] = (kl0, kl1)
     else:
@@ -257,6 +293,9 @@ def kl_diverge(X_train, y_train, cont=True):
             col_1 = Counter(map(lambda r: r[i], X_1))
 
             domain = set(col_0) | set(col_1)
+            for f in domain:
+                col_0[f] = 1e-300 if col_0[f] < 1e-300 else col_0[f]
+                col_1[f] = 1e-300 if col_1[f] < 1e-300 else col_1[f]
             pk = list(sorted(map(lambda c: col_0[c] / sum(col_0.values()),\
                 domain)))
             qk = list(sorted(map(lambda c: col_1[c] / sum(col_1.values()),\
@@ -264,14 +303,6 @@ def kl_diverge(X_train, y_train, cont=True):
 
             kl0 = entropy(qk, pk)
             kl1 = entropy(pk, qk)
-
-            if kl0 < np.inf and kl1 < np.inf:
-                if max(kl0, kl1) > max_kl:
-                    max_kl = max(kl0, kl1)
-            elif kl0 < np.inf and kl0 > max_kl:
-                max_kl = kl0
-            elif kl1 < np.inf and kl1 > max_kl:
-                max_kl = kl1
 
             kl_arr[i] = (kl0, kl1)
 
