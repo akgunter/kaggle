@@ -1,5 +1,3 @@
-from __future__ import division
-
 import os
 import pickle
 from collections import Counter
@@ -10,7 +8,8 @@ import pandas as pd
 import xgboost as xgb
 
 from scipy.stats import entropy
-from scipy.stats import norm
+from scipy.stats import gaussian_kde
+from scipy.stats import uniform
 
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.feature_selection import GenericUnivariateSelect
@@ -23,69 +22,42 @@ from sklearn.svm import OneClassSVM
 
 
 def main():
-    archive = init()
-    X_train = archive[0]
-    X_train_cont = archive[1]
-    X_train_disc = archive[2]
-    y_train = archive[3]
-    X_test = archive[4]
-    X_test_cont = archive[5]
-    X_test_disc = archive[6]
-    id_test = archive[7]
+    kl_archive = kl_init()
 
-    #X_train, X_test = preprocess(X_train, y_train, X_test)
+    kl_arr = kl_archive[-1]
+    kl_arr = list(sorted(kl_arr))#[9 * len(kl_arr) // 10:]
 
-    print("== Calculating KL Divergence ==")
-    kl_arr_disc = kl_diverge(X_train_disc, y_train, cont=False)
-    kl_arr_cont = kl_diverge(X_train_cont, y_train)
-
-    kl_data = (kl_arr_disc, kl_arr_cont)
-    pickle.dump(kl_data, open("kl_data.pckl", 'wb'))
-
-    kl_arr_disc = list(sorted(map(lambda k: k / max(kl_arr_disc), kl_arr_disc)))
-    kl_arr_cont = list(sorted(map(lambda k: k / max(kl_arr_cont), kl_arr_cont)))
-
-    left = - int(max(len(kl_arr_disc), len(kl_arr_cont)) * 0.05)
-    right = max(len(kl_arr_disc), len(kl_arr_cont)) - left
-    bottom = kl_arr_disc[0] - kl_arr_disc[-1]/20
-    top = kl_arr_disc[-1] * 1.05
+    left = - int(max(len(kl_arr), len(kl_arr)) * 0.05)
+    right = max(len(kl_arr), len(kl_arr)) - left
+    bottom = kl_arr[0] - kl_arr[-1]/20
+    top = kl_arr[-1] * 1.05
     plt.axis([left, right, bottom, top])
     ax = plt.gca()
     ax.set_autoscale_on(False)
-    plt.plot(kl_arr_disc)
-    plt.plot(kl_arr_cont)
-    plt.show()
-    #kl_map = sorted(zip(kl_arr, range(len(kl_arr))), reverse=True)
-    #print(list(map(lambda k: k[0], kl_map)))
-    '''
-    plt.plot(list(map(lambda k: k[0], kl_map)))
+    plt.xlabel("Feature Index")
     plt.ylabel("KL Divergence")
+    plt.plot(kl_arr)
     plt.show()
-    '''
 
-    '''
-    # classifier
-    clf = xgb.XGBClassifier(missing=np.nan, max_depth=5, n_estimators=350,\
-        learning_rate=0.03, nthread=4, subsample=0.95, colsample_bytree=0.85,\
-        seed=4242)
 
-    X_fit, X_eval, y_fit, y_eval= train_test_split(X_train1, y_train1,\
-        test_size=0.3)
+def kl_init():
+    archfile = 'kl_archive.pckl'
+    if os.path.isfile(archfile):
+        print("== Reloading KL Divergence Data ==")
+        kl_archive = pickle.load(open(archfile, 'rb'))
+    else:
+        archive = init()
+        X_train = archive[0]
+        y_train = archive[1]
+        X_test = archive[2]
+        c_cols, d_cols = split_data_types(X_train, X_test)
 
-    # fitting
-    print("== Training Classifier ==")
-    clf.fit(X_train1, y_train1, early_stopping_rounds=20, eval_metric="auc",\
-        eval_set=[(X_eval, y_eval)])
+        print("== Computing KL Divergence Data ==")
+        kl_arr = kl_diverge(X_train, y_train, c_cols, d_cols)
+        kl_archive = archive + [c_cols, d_cols, kl_arr]
+        pickle.dump(kl_archive, open(archfile, 'wb'))
 
-    auc = roc_auc_score(y_train, clf.predict_proba(X_train)[:,1])
-    print('Overall AUC:', auc)
-
-    y_pred = clf.predict_proba(X_test)[:,1]
-    submission = pd.DataFrame({"ID":id_test, "TARGET":y_pred})
-    submission.to_csv("submission.csv", index=False)
-
-    print('Completed!')
-    '''
+    return kl_archive
 
 def init():
     archfile = 'archive.pckl'
@@ -94,21 +66,13 @@ def init():
         archive = pickle.load(open(archfile, 'rb'))
     else:
         print("== Loading Data ==")
-        archive = load_data()
-        X_train = archive[0]
-        X_test = archive[2]
-        split_data = split_data_types(X_train, X_test)
-        X_train_cont, X_train_disc, X_test_cont, X_test_disc = split_data
-        archive = (
+        X_train, y_train, X_test, id_test = load_data()
+        archive = [
             X_train,
-            X_train_cont,
-            X_train_disc,
-            archive[1],
+            y_train,
             X_test,
-            X_test_cont,
-            X_test_disc,
-            archive[3]
-        )
+            id_test
+        ]
         pickle.dump(archive, open(archfile, 'wb'))
 
     return archive
@@ -165,31 +129,10 @@ def split_data_types(X_train, X_test):
                 col_is_cont[c] = True
                 break
 
-    # Create new ndarray for each case
-    X_train_cont = np.ndarray(shape=(X_train.shape[0], sum(col_is_cont)),\
-            dtype=np.float64)
-    X_train_disc = np.ndarray(shape=(X_train.shape[0], len(col_is_cont) -\
-            sum(col_is_cont)), dtype=np.float64)
+    c_cols = set(filter(lambda i: col_is_cont[i], range(len(col_is_cont))))
+    d_cols = set(range(len(col_is_cont))) - c_cols
 
-    X_test_cont = np.ndarray(shape=(X_train.shape[0], sum(col_is_cont)),\
-            dtype=np.float64)
-    X_test_disc = np.ndarray(shape=(X_train.shape[0], len(col_is_cont) -\
-            sum(col_is_cont)), dtype=np.float64)
-
-    # Copy columns appropriately
-    c_idx = 0
-    d_idx = 0
-    for c in range(len(col_is_cont)):
-        if col_is_cont[c]:
-            X_train_cont[:,c_idx] = X_train[:,c]
-            X_test_cont[:,c_idx] = X_train[:,c]
-            c_idx += 1
-        else:
-            X_train_disc[:,d_idx] = X_train[:,c]
-            X_test_disc[:,d_idx] = X_train[:,c]
-            d_idx += 1
-
-    return X_train_cont, X_train_disc, X_test_cont, X_test_disc
+    return c_cols, d_cols
 
 def preprocess(X_train, y_train, X_test):
     print("== Preprocessing Data ==")
@@ -211,9 +154,8 @@ def preprocess(X_train, y_train, X_test):
 
     return X_train, X_test
 
-from scipy.stats import gaussian_kde
-from scipy.stats import uniform
-def kl_diverge(X_train, y_train, cont=True):
+def kl_diverge(X_train, y_train, c_cols, d_cols):
+    # Separate data matrix into Class 0 and Class 1 matrices
     num_0 = sum(map(lambda y: not y, y_train))
     num_1 = sum(y_train)
     X_0 = np.ndarray(shape=(num_0, X_train.shape[1]), dtype=np.float64)
@@ -230,90 +172,70 @@ def kl_diverge(X_train, y_train, cont=True):
             idx_1 += 1
 
     kl_arr = [0] * X_train.shape[1]
-    max_kl = 0
 
-    if cont:
-        from numpy.linalg.linalg import LinAlgError
-        for i in range(X_train.shape[1]):
-            col_0 = X_0[:,i]
-            col_1 = X_1[:,i]
-            col_0 = list(sorted(map(lambda r: r[i], X_0)))
-            col_1 = list(sorted(map(lambda r: r[i], X_1)))
+    print("Computing KLD for continuous columns...")
+    c_count = 0
+    for i in c_cols:
+        print("%d of %d..." % (c_count, len(c_cols)))
+        # Get column
+        col_0 = X_0[:,i]
+        col_1 = X_1[:,i]
+        col_0 = list(sorted(map(lambda r: r[i], X_0)))
+        col_1 = list(sorted(map(lambda r: r[i], X_1)))
 
-            left = min(col_0[0], col_1[0])
-            right = max(col_0[-1], col_1[-1])
-            domain = np.linspace(left, right, 1000)
+        # Determine 1000 values to compare
+        left = min(col_0[0], col_1[0])
+        right = max(col_0[-1], col_1[-1])
+        domain = np.linspace(left, right, 1000)
 
-            elem_0 = set(col_0)
-            elem_1 = set(col_1)
-            if len(elem_0) == 1:
-                pk = list(map(lambda x: 1 if x in elem_0 else 0, domain))
-            else:
-                t0 = gaussian_kde(col_0)
-                pk = t0.pdf(domain)
+        # If a column is always c for a class, then gaussian_kde() fails
+        # In such cases, use a uniform distribution for the class
+        elem_0 = set(col_0)
+        elem_1 = set(col_1)
+        if len(elem_0) == 1:
+            pk = list(map(lambda x: 1 if x in elem_0 else 0, domain))
+        else:
+            dist0 = gaussian_kde(col_0)
+            pk = dist0.pdf(domain)
 
-            if len(elem_1) == 1:
-                qk = list(map(lambda x: 1 if x in elem_1 else 0, domain))
-            else:
-                t1 = gaussian_kde(col_1)
-                qk = t1.pdf(domain)
-            print("%d of %d" % (i, X_train.shape[1]))
+        if len(elem_1) == 1:
+            qk = list(map(lambda x: 1 if x in elem_1 else 0, domain))
+        else:
+            dist1 = gaussian_kde(col_1)
+            qk = dist1.pdf(domain)
 
-            pk = list(map(lambda k: 1e-300 if k < 1e-300 else k, pk))
-            qk = list(map(lambda k: 1e-300 if k < 1e-300 else k, qk))
+        # Map extremely small values to non-zero to avoid inf quotients
+        pk = list(map(lambda k: 1e-300 if k < 1e-300 else k, pk))
+        qk = list(map(lambda k: 1e-300 if k < 1e-300 else k, qk))
 
-            kl0 = entropy(qk, pk)
-            kl1 = entropy(pk, qk)
+        kl0 = entropy(qk, pk)
+        kl1 = entropy(pk, qk)
 
-            '''
-            from math import log
-            if kl0 < np.inf and kl1 < np.inf:
-                if max(kl0, kl1) > max_kl:
-                    max_kl = max(kl0, kl1)
-            else:
-                if kl0 < np.inf and kl0 > max_kl:
-                    max_kl = kl0
-                    print(sum(map(lambda t: t[0] * log(t[0] / t[1]), zip(pk, qk))))
-                    print("kl0")
-                    #print("inf")
-                if kl1 < np.inf and kl1 > max_kl:
-                    max_kl = kl1
-                    #print(sum(map(lambda t: t[1] * log(t[1] / t[0]), zip(pk, qk))))
-                    arr = list(map(lambda t: t[1] / t[0], zip(pk, qk)))
-                    idx = arr.index(np.inf)
-                    print(pk[idx], qk[idx], arr[idx])
-                    print("kl1")
-                    #print("inf")
-            '''
+        kl_arr[i] = np.mean([kl0, kl1])
+        c_count += 1
 
-            kl_arr[i] = (kl0, kl1)
-    else:
-        for i in range(X_train.shape[1]):
-            col_0 = Counter(map(lambda r: r[i], X_0))
-            col_1 = Counter(map(lambda r: r[i], X_1))
+    print("Computing KLD for discrete columns...")
+    for i in d_cols:
+        # Convert columns to frequency tables
+        dist0 = Counter(map(lambda r: r[i], X_0))
+        dist1 = Counter(map(lambda r: r[i], X_1))
+        
+        # Get domain
+        domain = set(dist0) | set(dist1)
 
-            domain = set(col_0) | set(col_1)
-            for f in domain:
-                col_0[f] = 1e-300 if col_0[f] < 1e-300 else col_0[f]
-                col_1[f] = 1e-300 if col_1[f] < 1e-300 else col_1[f]
-            pk = list(sorted(map(lambda c: col_0[c] / sum(col_0.values()),\
-                domain)))
-            qk = list(sorted(map(lambda c: col_1[c] / sum(col_1.values()),\
-                domain)))
+        # Map extremely small values to non-zero to avoid inf quotients
+        for x in domain:
+            dist0[x] = 1e-300 if dist0[x] < 1e-300 else dist0[x]
+            dist1[x] = 1e-300 if dist1[x] < 1e-300 else dist1[x]
+        pk = list(sorted(map(lambda c: dist0[c] / sum(dist0.values()),\
+            domain)))
+        qk = list(sorted(map(lambda c: dist1[c] / sum(dist1.values()),\
+            domain)))
 
-            kl0 = entropy(qk, pk)
-            kl1 = entropy(pk, qk)
+        kl0 = entropy(qk, pk)
+        kl1 = entropy(pk, qk)
 
-            kl_arr[i] = (kl0, kl1)
-
-    for i in range(len(kl_arr)):
-        a, b = kl_arr[i]
-        if a == np.inf:
-            a = max_kl * 10
-        if b == np.inf:
-            b = max_kl * 10
-
-        kl_arr[i] = np.mean([a, b])
+        kl_arr[i] = np.mean([kl0, kl1])
 
     return kl_arr
 
