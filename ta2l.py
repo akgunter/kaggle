@@ -12,87 +12,53 @@ from scipy.stats import entropy
 from scipy.stats import gaussian_kde
 from scipy.stats import uniform
 
-from sklearn.preprocessing import MinMaxScaler
-from sklearn.naive_bayes import GaussianNB
-from sklearn.naive_bayes import BernoulliNB
-from sklearn.feature_selection import GenericUnivariateSelect
-from sklearn.feature_selection import chi2
-from sklearn.cross_validation import train_test_split
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import roc_auc_score
-from sklearn.pipeline import Pipeline
-from sklearn.svm import OneClassSVM
-from sklearn.ensemble import VotingClassifier
 from sklearn.base import BaseEstimator
 from sklearn.base import ClassifierMixin
+from sklearn.pipeline import Pipeline
+
+from sklearn.naive_bayes import BernoulliNB
+from sklearn.naive_bayes import GaussianNB
+from sklearn.naive_bayes import MultinomialNB
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.feature_selection import GenericUnivariateSelect
+from sklearn.feature_selection import chi2
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import VotingClassifier
+from sklearn.svm import OneClassSVM
 
 
-tst = 0
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import Normalizer
+from sklearn.decomposition import PCA
+from sklearn.decomposition import IncrementalPCA
+from sklearn.preprocessing import normalize
 
-class VotingClassifier(BaseEstimator, ClassifierMixin):
-    def __init__(self, classifiers, weights=None):
-        self.clfs = classifiers
-        self.weights = weights
+from sklearn.cross_validation import train_test_split
+from sklearn.cross_validation import StratifiedKFold
 
-    def fit(self, arg_arr):
-        pairs = zip(self.clfs, arg_arr)
-        for clf, args in pairs:
-            clf.fit(**args)
-
-    def predict(self, X):
-        self.classes_ = np.asarray([clf.predict(X) for clf in self.clfs])
-        if self.weights:
-            avg = self.predict_proba(X)
-
-            majority = np.apply_along_axis(lambda x: max(enumerate(x),\
-                key=operator.itemgetter(1))[0], axis=1, arr=avg)
-
-        else:
-            majority = np.asarray([np.argmax(np.bincount(self.classes_[:,c]))\
-                for c in range(self.classes_.shape[1])])
-
-        return majority
-
-    def predict_proba(self, X):
-        def vote(t):
-            global tst
-            from collections import defaultdict
-            count = Counter()
-            for i in range(len(t)):
-                val = 0 if t[i][0] > t[i][1] else 1
-                count[val] += self.weights[i]
-            vote = count.most_common(1)[0][0]
-            if vote:
-                global tst
-                tst += 1
-                out = max(t, key=lambda x: x[1])
-            else:
-                out = min(t, key=lambda x: x[1])
-
-            return out
-
-        probs = [clf.predict_proba(X) for clf in self.clfs]
-        self.probas_ = zip(*probs)
-        majority = np.asarray([vote(x) for x in self.probas_])
-
-        return majority
+from sklearn.metrics import log_loss
+from sklearn.metrics import roc_auc_score
 
 
 def main():
     #X_train, y_train, X_test, id_test = init()
 
-    kl_archive = kl_init()
-    X_train = kl_archive[0]
-    y_train = kl_archive[1]
-    X_test = kl_archive[2]
-    id_test = kl_archive[3]
-    c_cols = kl_archive[4]
-    d_cols = kl_archive[5]
-    kl_arr = kl_archive[6]
+    #kl_archive = kl_init()
+    df_train, df_test = init()
 
-    X_train, X_test, kl_map = kl_filter(X_train, X_test, kl_arr, n=(0, 80))
-    #X_train, X_test = preprocess(X_train, y_train, X_test)
+    #df_train, df_test = preprocess(df_train, df_test)
+
+    '''
+    X_train = df_to_ndarray(df_train, df_train.columns[1:-1])
+    y_train = df_to_ndarray(df_train, df_train.columns[-1])
+    X_test = df_to_ndarray(df_test, df_test.columns[1:])
+    y_test = df_to_ndarray(df_test, df_test.columns[0])
+    #c_cols = kl_archive[4]
+    #d_cols = kl_archive[5]
+    #kl_map = kl_archive[6]
+
+    #X_train, X_test, kl_map = kl_filter(X_train, X_test, kl_map, n=(0, 100))
 
     X_fit, X_valid, y_fit, y_valid = train_test_split(X_train,\
         y_train, test_size=0.3)
@@ -100,61 +66,75 @@ def main():
         test_size=0.3)
 
     # classifiers
-    xgb_clf = xgb.XGBClassifier(missing=np.nan, max_depth=5, n_estimators=1000,\
-        learning_rate=0.03, nthread=4, subsample=0.95, colsample_bytree=0.85,\
+    xgb_clf = xgb.XGBClassifier(missing=np.nan, max_depth=5, n_estimators=350,\
+        learning_rate=0.025, nthread=4, subsample=0.9, colsample_bytree=0.85,\
         silent=True)
     lr_clf = LogisticRegression(penalty='l1', class_weight='balanced',\
         random_state=1, n_jobs=4)
     rf_clf = RandomForestClassifier(random_state=1, n_jobs=4)
-    bnb_clf = BernoulliNB(alpha=10) 
+    #bnb_clf = BernoulliNB(alpha=0.1) 
+    mnb_clf = MultinomialNB(alpha=1)
+    knn_clf = KNeighborsClassifier(n_neighbors=5, algorithm='kd_tree')
 
-    eclf = VotingClassifier(classifiers=[xgb_clf, lr_clf, rf_clf, bnb_clf],\
-        weights=[1,1,2,1])
-    #eclf = VotingClassifier(classifiers=[xgb_clf], weights=[1])
+    #eclf = VotingClassifier(classifiers=[xgb_clf, lr_clf, rf_clf, mnb_clf],\
+    #    weights=[2,1,1,1])
+    eclf = VotingClassifier(classifiers=[xgb_clf], weights=[1])
+    eclf = xgb_clf
 
     # fitting
+
     print("== Training Classifier ==")
-    '''
-    fit_args = [
-            {
-                'X': X_fit,
-                'y': y_fit,
-                'early_stopping_rounds': 100,
-                'eval_metric': "auc",
-                'eval_set': [(X_eval, y_eval)]
-            },
-            {'X': X_fit, 'y': y_fit},
-            {'X': X_fit, 'y': y_fit},
-            {'X': X_fit, 'y': y_fit}
-    ]
-
-    eclf.fit(fit_args)
-
-    global tst
-    tst = 0
-    auc = roc_auc_score(y_valid, eclf.predict_proba(X_valid)[:,1])
-    print("Validation Class 1 count:", tst, "out of", X_valid.shape[0])
-    print('Validation AUC:', auc)
-    '''
-    
     fit_args = [
             {
                 'X': X_train,
                 'y': y_train,
-                'early_stopping_rounds': 100,
+                'early_stopping_rounds': 50,
                 'eval_metric': "auc",
-                'eval_set': [(X_eval, y_eval)]
-            },
-            {'X': X_train, 'y': y_train},
-            {'X': X_train, 'y': y_train},
-            {'X': X_train, 'y': y_train}
+                'eval_set': [(X_eval, y_eval)],
+                'verbose': False
+            }
+            #},
+            #{'X': X_fit, 'y': y_fit},
+            #{'X': X_fit, 'y': y_fit},
+            #{'X': X_fit, 'y': y_fit}
     ]
 
-    eclf.fit(fit_args)
+    #eclf.fit(fit_args)
+    eclf.fit(**(fit_args[0]))
 
-    tst = 0
-    y_pred = eclf.predict_proba(X_test)[:,1]
-    print("Testing Class 1 count:", tst, "out of", len(y_pred))
+    print("== Validating ==")
+    auc = roc_auc_score(y_valid, eclf.predict_proba(X_valid)[:,1])
+    print('Validation AUC:', auc)
+    '''
+
+    '''
+    fit_args = [
+            {
+                'X': X_train,
+                'y': y_train,
+                'early_stopping_rounds': 50,
+                'eval_metric': "auc",
+                'eval_set': [(X_eval, y_eval)],
+                'verbose': False
+            }
+            #},
+            #{'X': X_train, 'y': y_train},
+            #{'X': X_train, 'y': y_train},
+            #{'X': X_train, 'y': y_train}
+    ]
+
+    #eclf.fit(fit_args)
+    eclf.fit(**(fit_args[0]))
+    '''
+
+    eclf = RandomForestClassifier(random_state=1, n_jobs=4)
+    #eclf = xgb.XGBClassifier(missing=np.nan, max_depth=5, n_estimators=350,\
+    #    learning_rate=0.025, nthread=4, subsample=0.9, colsample_bytree=0.85,\
+    #    silent=True)
+    y_pred = run_classifier(eclf, df_train, df_test)
+    id_test = df_to_ndarray(df_test, df_test.columns[0])
+
+    #y_pred = eclf.predict_proba(X_test)[:,1]
     submission = pd.DataFrame({"ID":id_test, "TARGET":y_pred})
     submission.to_csv("submission.csv", index=False)
 
@@ -174,8 +154,8 @@ def kl_init():
         c_cols, d_cols = split_data_types(X_train, X_test)
 
         print("== Computing KL Divergence Data ==")
-        kl_arr = kl_diverge(X_train, y_train, c_cols, d_cols)
-        kl_archive = archive + [c_cols, d_cols, kl_arr]
+        kl_map = kl_diverge(X_train, y_train, c_cols, d_cols)
+        kl_archive = archive + [c_cols, d_cols, kl_map]
         pickle.dump(kl_archive, open(archfile, 'wb'))
 
     return kl_archive
@@ -187,12 +167,10 @@ def init():
         archive = pickle.load(open(archfile, 'rb'))
     else:
         print("== Loading Data ==")
-        X_train, y_train, X_test, id_test = load_data()
+        df_train, df_test = load_data()
         archive = [
-            X_train,
-            y_train,
-            X_test,
-            id_test
+            df_train,
+            df_test
         ]
         archive = load_data()
         pickle.dump(archive, open(archfile, 'wb'))
@@ -225,48 +203,50 @@ def load_data():
     df_train.drop(remove, axis=1, inplace=True)
     df_test.drop(remove, axis=1, inplace=True)
 
-    y_train = df_train['TARGET'].values
-    X_train = df_train.drop(['ID','TARGET'], axis=1).values
+    return df_train, df_test
 
-    id_test = df_test['ID']
-    X_test = df_test.drop(['ID'], axis=1).values
-    
-    cols = df_train.columns
-    for i in range(len(cols)):
-        if cols[i] == 'var15':
-            print(i)
-            break
+def get_cont_disc_cols(df_train, df_test):
+    def get_cont(df, cols):
+        c_cols = set()
+        for c in cols:
+            for x in df[c].values:
+                if int(x) != x:
+                    c_cols.add(c)
+                    break
+        return c_cols
 
-    return X_train, y_train, X_test, id_test
 
-def split_data_types(X_train, X_test):
-    print("== Splitting Continuous and Discrete ==")
+    print("Splitting continuous and discrete...")
 
     # Find continuous columns
-    col_is_cont = [False]*X_train.shape[1]
-    for c in range(X_train.shape[1]):
-        for i in range(X_train.shape[0]):
-            if int(X_train[i, c]) != X_train[i, c]:
-                col_is_cont[c] = True
-                break
-    for c in range(X_test.shape[1]):
-        if col_is_cont[c]:
-            continue
-        for i in range(X_test.shape[0]):
-            if int(X_test[i, c]) != X_test[i, c]:
-                col_is_cont[c] = True
-                break
+    train_cols = set(df_train.columns)
+    test_cols = set(df_train.columns)
+    cols = train_cols & test_cols
+    cols -= set(['TARGET', 'ID'])
 
-    c_cols = set(filter(lambda i: col_is_cont[i], range(len(col_is_cont))))
-    d_cols = set(range(len(col_is_cont))) - c_cols
+    c_cols = get_cont(df_train, cols)
+    c_cols |= get_cont(df_test, cols)
+
+    d_cols = cols - c_cols
 
     return c_cols, d_cols
 
-def preprocess(X_train, y_train, X_test):
+def preprocess(df_train, df_test):
     print("== Preprocessing Data ==")
-    X_merge = np.concatenate((X_train, X_test), axis=0)
-    sep = X_train.shape[0]
 
+    c_cols, d_cols = map(list, get_cont_disc_cols(df_train, df_test))
+
+    print("Running PCA...")
+    X_cont = pd.concat((df_train[c_cols], df_test[c_cols]), axis=0)
+    sep = df_train.shape[0]
+
+    pca = PCA(n_components=5)
+    X_proj = pca.fit_transform(normalize(X_cont, axis=0))
+    for i in range(X_proj.shape[1]):
+        df_train.insert(1, 'PCA%d'%i, X_proj[:sep,i])
+        df_test.insert(1, 'PCA%d'%i, X_proj[sep:,i])
+
+    '''
     # Scale features to range [0, 1]
     scale = MinMaxScaler()
     X_merge = scale.fit_transform(X_merge)
@@ -279,10 +259,106 @@ def preprocess(X_train, y_train, X_test):
     gus.fit(X_train, y_train)
     X_train = gus.transform(X_train)
     X_test = gus.transform(X_test)
+    '''
 
+    '''
+    from sklearn.decomposition import IncrementalPCA
+    ipca = IncrementalPCA(n_components=3)
+    ipca.fit(X_merge)
+
+    X_train = X_train.reshape((X_train.shape[0], X_train.shape[1]+3))
+    X_test = X_test.reshape((X_test.shape[0], X_test.shape[1]+3))
+    
+    X_train[:,-3:] = ipca.transform(X_train)
+    X_test[:,-3:] = ipca.transform(X_test)
+    '''
+
+    '''
+    nmzr = Normalizer(norm='l2')
+    X_merge = nmzr.fit_transform(X_merge)
+    
+    scale = MinMaxScaler()
+    X_merge = scale.fit_transform(X_merge)
+
+    X_train = X_merge[:sep]
+    X_test = X_merge[sep:]
+    
     return X_train, X_test
+    '''
+    
+    return df_train, df_test
 
-def kl_filter(X_train, X_test, kl_arr, n=50):
+def kl_diverge(df_train, c_cols, d_cols):
+    rows_1 = filter(lambda i: df_train['TARGET'][i], range(df_train.shape[0]))
+    rows_1 = set(rows_1)
+    rows_0 = set(range(df_train.shape[0])) - rows_1
+
+    kl_map = {}
+
+    print("Computing KLD for continuous columns...")
+    c_count = 0
+    for c in c_cols:
+        print("%d of %d" % (c_count, len(c_cols)))
+        # Get column vector for each class
+        col_0 = df_train[c][rows_0]
+        col_1 = df_train[c][rows_1]
+
+        # Get domain to compute probabilities on
+        left = min(col_0.min(), col_1.min())
+        right = max(col_0.max(), col_1.max())
+        domain = np.linspace(left, right, 1000)
+    
+        # Estimate feature's distributions using Gaussian Kernel Density
+        # Estimation. If a feature is constant for a class, use a so-called
+        # "finite delta function" for its distribution. (Pr(x) = 1 for x == c
+        # and Pr(x) = 0 for x != c)
+        if col_0.std() == 0:
+            pk = list(map(lambda x: 1 if x in elem_0 else 0, domain))
+        else:
+            dist_0 = gaussian_kde(col_0)
+            pk = dist_0.pdf(domain)
+        if col_1.std() == 0:
+            qk = list(map(lambda x: 1 if x in elem_1 else 0, domain))
+        else:
+            dist_1 = gaussian_kde(col_1)
+            qk = dist_1.pdf(domain)
+
+        # Map extremely small values to non-zero to avoid inf quotients
+        pk = list(map(lambda k: 1e-300 if k < 1e-300 else k, pk))
+        qk = list(map(lambda k: 1e-300 if k < 1e-300 else k, qk))
+
+        kl_0 = entropy(qk, pk)
+        kl_1 = entropy(pk, qk)
+
+        kl_map[c] = np.mean([kl_0, kl_1])
+        c_count += 1
+
+    print("Computing KLD for discrete columns...")
+    for c in d_cols:
+        # Convert columns to frequency tables
+        dist_0 = Counter(df_train[c][rows_0])
+        dist_1 = Counter(df_train[c][rows_1])
+
+        # Get domain
+        domain = set(dist_0) | set(dist_1)
+
+        # Map extremely small values to non-zero to avoid inf quotients
+        for x in domain:
+            dist_0[x] = 1e-300 if dist_0[x] < 1e-300 else dist_0[x]
+            dist_1[x] = 1e-300 if dist_1[x] < 1e-300 else dist_1[x]
+        pk = list(map(lambda c: dist_0[c] / sum(dist_0.values()),\
+            sorted(domain)))
+        qk = list(map(lambda c: dist_1[c] / sum(dist_1.values()),\
+            sorted(domain)))
+
+        kl_0 = entropy(qk, pk)
+        kl_1 = entropy(pk, qk)
+
+        kl_map[c] = np.mean([kl_0, kl_1])
+
+    return kl_map
+
+def kl_filter(X_train, X_test, kl_map, n=50):
     if type(n) == int:
         l = 0
         r = n
@@ -291,7 +367,7 @@ def kl_filter(X_train, X_test, kl_arr, n=50):
         r = max(n)
 
     print("== Reducing Features ==")
-    kl_map = list(sorted(zip(kl_arr, range(len(kl_arr))), reverse=True))
+    kl_map = list(sorted(zip(kl_map, range(len(kl_map))), reverse=True))
     X_train_fil = np.ndarray(shape=(X_train.shape[0], r-l), dtype=np.float64)
     X_test_fil = np.ndarray(shape=(X_test.shape[0], r-l), dtype=np.float64)
 
@@ -304,92 +380,106 @@ def kl_filter(X_train, X_test, kl_arr, n=50):
 
     return X_train_fil, X_test_fil, kl_map
 
-def kl_diverge(X_train, y_train, c_cols, d_cols):
-    # Separate data matrix into Class 0 and Class 1 matrices
-    num_0 = sum(map(lambda y: not y, y_train))
-    num_1 = sum(y_train)
-    X_0 = np.ndarray(shape=(num_0, X_train.shape[1]), dtype=np.float64)
-    X_1 = np.ndarray(shape=(num_1, X_train.shape[1]), dtype=np.float64)
+def df_to_ndarray(df, cols):
+    return df[cols].values
 
-    idx_0 = 0
-    idx_1 = 0
-    for i in range(y_train.shape[0]):
-        if not y_train[i]:
-            X_0[idx_0, :] = X_train[i, :]
-            idx_0 += 1
+def run_classifier(clf, df_train, df_test):
+    mk_xtrain = lambda df: df_to_ndarray(df, df.columns[1:-1])
+    mk_ytrain = lambda df: df_to_ndarray(df, df.columns[-1])
+    mk_xtest = lambda df: df_to_ndarray(df, df.columns[1:])
+
+    X_train = mk_xtrain(df_train)
+    y_train = mk_ytrain(df_train)
+    X_test = mk_xtest(df_test)
+
+    train_preds = None
+    test_preds = None
+
+    cycle = 0
+    skf = StratifiedKFold(y_train, n_folds=10)
+    for trn_rows, tst_rows in skf:
+        print("Cycle", cycle)
+        ilc_vsbl = df_train.iloc(trn_rows)
+
+        vsbl_train = ilc_vsbl[:][df_train.columns[1:-1]].values
+        vsbl_tgt = ilc_vsbl[:]['TARGET'].values
+
+        ilc_blnd = df_train.iloc(tst_rows)
+        blnd_train = ilc_blnd[:][df_train.columns[1:-1]].values
+        blnd_tgt = ilc_blnd[:]['TARGET'].values
+
+        #clf.fit(vsbl_train, vsbl_tgt, early_stopping_rounds=50,\
+        #    eval_metric='auc', eval_set=[(blnd_train, blnd_tgt)],\
+        #    verbose=False)
+        clf.fit(vsbl_train, vsbl_tgt)
+        blnd_pred = clf.predict_proba(blnd_train)[:,1]
+
+        print('Blind Log Loss:', log_loss(blnd_tgt, blnd_pred))
+        print('Blind AUC:', roc_auc_score(blnd_tgt, blnd_pred))
+
+        if type(train_preds) == type(None) and type(test_preds) == type(None):
+            train_preds = clf.predict_proba(X_train)[:,1]
+            test_preds = clf.predict_proba(X_test)[:,1]
         else:
-            X_1[idx_1, :] = X_train[i, :]
-            idx_1 += 1
+            train_preds *= clf.predict_proba(X_train)[:,1]
+            test_preds *= clf.predict_proba(X_test)[:,1]
+        cycle += 1
 
-    kl_arr = [0] * X_train.shape[1]
+    train_preds = np.power(train_preds, 1./cycle)
+    test_preds = np.power(test_preds, 1./cycle)
 
-    print("Computing KLD for continuous columns...")
-    c_count = 0
-    for i in c_cols:
-        print("%d of %d..." % (c_count, len(c_cols)))
-        # Get column
-        col_0 = X_0[:,i]
-        col_1 = X_1[:,i]
-        col_0 = list(sorted(map(lambda r: r[i], X_0)))
-        col_1 = list(sorted(map(lambda r: r[i], X_1)))
+    print('Average Log Loss:', log_loss(df_train.TARGET.values, train_preds))
+    print('Average AUC:', roc_auc_score(df_train.TARGET.values, train_preds))
 
-        # Get 1000 evenly spaced values from the observed domain
-        left = min(col_0[0], col_1[0])
-        right = max(col_0[-1], col_1[-1])
-        domain = np.linspace(left, right, 1000)
+    return test_preds
 
-        # Estimate feature's distributions using Gaussian Kernel Density
-        # Estimation. If a feature is constant for a class, use a so-called
-        # "finite delta function" for its distribution. (Pr(x) = 1 for x == c
-        # and Pr(x) = 0 for x != c)
-        elem_0 = set(col_0)
-        elem_1 = set(col_1)
-        if len(elem_0) == 1:
-            pk = list(map(lambda x: 1 if x in elem_0 else 0, domain))
+
+class VotingClassifier(BaseEstimator, ClassifierMixin):
+    def __init__(self, classifiers, weights=None):
+        self.clfs = classifiers
+        self.weights = weights
+
+    def fit(self, arg_arr):
+        pairs = zip(self.clfs, arg_arr)
+        for clf, args in pairs:
+            clf.fit(**args)
+
+    def predict(self, X):
+        self.classes_ = np.asarray([clf.predict(X) for clf in self.clfs])
+        if self.weights:
+            avg = self.predict_proba(X)
+
+            majority = np.apply_along_axis(lambda x: max(enumerate(x),\
+                key=operator.itemgetter(1))[0], axis=1, arr=avg)
+
         else:
-            dist0 = gaussian_kde(col_0)
-            pk = dist0.pdf(domain)
+            majority = np.asarray([np.argmax(np.bincount(self.classes_[:,c]))\
+                for c in range(self.classes_.shape[1])])
 
-        if len(elem_1) == 1:
-            qk = list(map(lambda x: 1 if x in elem_1 else 0, domain))
-        else:
-            dist1 = gaussian_kde(col_1)
-            qk = dist1.pdf(domain)
+        return majority
 
-        # Map extremely small values to non-zero to avoid inf quotients
-        pk = list(map(lambda k: 1e-300 if k < 1e-300 else k, pk))
-        qk = list(map(lambda k: 1e-300 if k < 1e-300 else k, qk))
+    def predict_proba(self, X):
+        def vote(t):
+            global tst
 
-        kl0 = entropy(qk, pk)
-        kl1 = entropy(pk, qk)
+            count = Counter()
+            for i in range(len(t)):
+                val = 0 if t[i][0] > t[i][1] else 1
+                count[val] += self.weights[i]
+            vote = count.most_common(1)[0][0]
+            print(t, count, vote)
+            if vote:
+                out = max(t, key=lambda x: x[1])
+            else:
+                out = min(t, key=lambda x: x[1])
 
-        kl_arr[i] = np.mean([kl0, kl1])
-        c_count += 1
+            return out
 
-    print("Computing KLD for discrete columns...")
-    for i in d_cols:
-        # Convert columns to frequency tables
-        dist0 = Counter(map(lambda r: r[i], X_0))
-        dist1 = Counter(map(lambda r: r[i], X_1))
-        
-        # Get domain
-        domain = set(dist0) | set(dist1)
+        probs = [clf.predict_proba(X) for clf in self.clfs]
+        self.probas_ = zip(*probs)
+        majority = np.asarray([vote(x) for x in self.probas_])
 
-        # Map extremely small values to non-zero to avoid inf quotients
-        for x in domain:
-            dist0[x] = 1e-300 if dist0[x] < 1e-300 else dist0[x]
-            dist1[x] = 1e-300 if dist1[x] < 1e-300 else dist1[x]
-        pk = list(sorted(map(lambda c: dist0[c] / sum(dist0.values()),\
-            domain)))
-        qk = list(sorted(map(lambda c: dist1[c] / sum(dist1.values()),\
-            domain)))
-
-        kl0 = entropy(qk, pk)
-        kl1 = entropy(pk, qk)
-
-        kl_arr[i] = np.mean([kl0, kl1])
-
-    return kl_arr
+        return majority
 
 
 if __name__ == '__main__':
