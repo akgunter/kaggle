@@ -127,10 +127,10 @@ def main():
     eclf.fit(**(fit_args[0]))
     '''
 
-    eclf = RandomForestClassifier(random_state=1, n_jobs=4)
-    #eclf = xgb.XGBClassifier(missing=np.nan, max_depth=5, n_estimators=350,\
-    #    learning_rate=0.025, nthread=4, subsample=0.9, colsample_bytree=0.85,\
-    #    silent=True)
+    #eclf = RandomForestClassifier(random_state=1, n_jobs=4)
+    eclf = xgb.XGBClassifier(missing=np.nan, max_depth=5, n_estimators=350,\
+        learning_rate=0.025, nthread=4, subsample=0.9, colsample_bytree=0.85,\
+        silent=True)
     y_pred = run_classifier(eclf, df_train, df_test)
     id_test = df_to_ndarray(df_test, df_test.columns[0])
 
@@ -408,10 +408,10 @@ def run_classifier(clf, df_train, df_test):
         blnd_train = ilc_blnd[:][df_train.columns[1:-1]].values
         blnd_tgt = ilc_blnd[:]['TARGET'].values
 
-        #clf.fit(vsbl_train, vsbl_tgt, early_stopping_rounds=50,\
-        #    eval_metric='auc', eval_set=[(blnd_train, blnd_tgt)],\
-        #    verbose=False)
-        clf.fit(vsbl_train, vsbl_tgt)
+        clf.fit(vsbl_train, vsbl_tgt, early_stopping_rounds=50,\
+            eval_metric='auc', eval_set=[(blnd_train, blnd_tgt)],\
+            verbose=False)
+        #clf.fit(vsbl_train, vsbl_tgt)
         blnd_pred = clf.predict_proba(blnd_train)[:,1]
 
         print('Blind Log Loss:', log_loss(blnd_tgt, blnd_pred))
