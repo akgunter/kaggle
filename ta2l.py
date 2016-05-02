@@ -44,10 +44,25 @@ from sklearn.metrics import roc_auc_score
 def main():
     #X_train, y_train, X_test, id_test = init()
 
-    #kl_archive = kl_init()
-    df_train, df_test = init()
-
+    #df_train, df_test = init()
     #df_train, df_test = preprocess(df_train, df_test)
+    
+    #kl_archive = kl_init((df_train, df_test))
+    kl_archive = kl_init()
+    df_train = kl_archive[0]
+    df_test = kl_archive[1]
+    kl_map = kl_archive[-1]
+    
+    kl_tup = list(sorted((kl_map[k], k) for k in kl_map))
+    keys = [t[1] for t in kl_tup]
+    x = list(range(len(kl_map)))
+    y = [t[0] for t in kl_tup]
+
+    plt.bar(x, y, align='center')
+    plt.xticks(x, ['']*len(keys))
+    plt.show()
+
+    #df_train, df_test = kl_filter(df_train, df_test, kl_map, n=200)
 
     '''
     X_train = df_to_ndarray(df_train, df_train.columns[1:-1])
@@ -127,10 +142,10 @@ def main():
     eclf.fit(**(fit_args[0]))
     '''
 
+    '''
     #eclf = RandomForestClassifier(random_state=1, n_jobs=4)
-    eclf = xgb.XGBClassifier(missing=np.nan, max_depth=5, n_estimators=350,\
-        learning_rate=0.025, nthread=4, subsample=0.9, colsample_bytree=0.85,\
-        silent=True)
+    eclf = xgb.XGBClassifier(missing=np.nan, max_depth=7, n_estimators=350,\
+        learning_rate=0.025, nthread=4, subsample=0.6, colsample_bytree=0.85)
     y_pred = run_classifier(eclf, df_train, df_test)
     id_test = df_to_ndarray(df_test, df_test.columns[0])
 
@@ -139,23 +154,29 @@ def main():
     submission.to_csv("submission.csv", index=False)
 
     print('Completed!')
+    '''
 
 
-def kl_init():
+def plot_kl(kl_map):
+    x = scipy.arrange(len(kl_map))
+    keys = sorted(kl_map.keys())
+    y = scipy.array([kl_map[k] for k in keys])
+
+def kl_init(archive=None):
     archfile = 'kl_archive.pckl'
     if os.path.isfile(archfile):
         print("== Reloading KL Divergence Data ==")
         kl_archive = pickle.load(open(archfile, 'rb'))
     else:
-        archive = init()
-        X_train = archive[0]
-        y_train = archive[1]
-        X_test = archive[2]
-        c_cols, d_cols = split_data_types(X_train, X_test)
+        if archive == None:
+            df_train, df_test = init()
+        else:
+            df_train, df_test = archive
+        c_cols, d_cols = get_cont_disc_cols(df_train, df_test)
 
         print("== Computing KL Divergence Data ==")
-        kl_map = kl_diverge(X_train, y_train, c_cols, d_cols)
-        kl_archive = archive + [c_cols, d_cols, kl_map]
+        kl_map = kl_diverge(df_train, c_cols, d_cols)
+        kl_archive = [df_train, df_test, c_cols, d_cols, kl_map]
         pickle.dump(kl_archive, open(archfile, 'wb'))
 
     return kl_archive
@@ -205,6 +226,13 @@ def load_data():
 
     return df_train, df_test
 
+def get_cols(df_train, df_test):
+    train_cols = set(df_train.columns)
+    test_cols = set(df_test.columns)
+    cols = train_cols & test_cols
+    cols -= set(['TARGET', 'ID'])
+    return cols
+
 def get_cont_disc_cols(df_train, df_test):
     def get_cont(df, cols):
         c_cols = set()
@@ -219,11 +247,7 @@ def get_cont_disc_cols(df_train, df_test):
     print("Splitting continuous and discrete...")
 
     # Find continuous columns
-    train_cols = set(df_train.columns)
-    test_cols = set(df_train.columns)
-    cols = train_cols & test_cols
-    cols -= set(['TARGET', 'ID'])
-
+    cols = get_cols(df_train, df_test)
     c_cols = get_cont(df_train, cols)
     c_cols |= get_cont(df_test, cols)
 
@@ -240,11 +264,23 @@ def preprocess(df_train, df_test):
     X_cont = pd.concat((df_train[c_cols], df_test[c_cols]), axis=0)
     sep = df_train.shape[0]
 
-    pca = PCA(n_components=5)
+    pca = PCA(n_components=len(c_cols))
     X_proj = pca.fit_transform(normalize(X_cont, axis=0))
     for i in range(X_proj.shape[1]):
         df_train.insert(1, 'PCA%d'%i, X_proj[:sep,i])
         df_test.insert(1, 'PCA%d'%i, X_proj[sep:,i])
+
+    df_train.drop(c_cols, axis=1, inplace=True)
+    df_test.drop(c_cols, axis=1, inplace=True)
+
+    '''
+    cols = list(get_cols(df_train, df_test))
+    scale = MinMaxScaler()
+    df_merge = pd.concat((df_train[cols], df_test[cols]), axis=0)
+    X_merge = scale.fit_transform(df_merge)
+    for r in X_merge:
+        df_merge[cols][r] = X_merge[r,:]
+    '''
 
     '''
     # Scale features to range [0, 1]
@@ -313,19 +349,19 @@ def kl_diverge(df_train, c_cols, d_cols):
         # "finite delta function" for its distribution. (Pr(x) = 1 for x == c
         # and Pr(x) = 0 for x != c)
         if col_0.std() == 0:
-            pk = list(map(lambda x: 1 if x in elem_0 else 0, domain))
+            pk = list(map(lambda x: 1 if x in col_0.values else 0, domain))
         else:
             dist_0 = gaussian_kde(col_0)
             pk = dist_0.pdf(domain)
         if col_1.std() == 0:
-            qk = list(map(lambda x: 1 if x in elem_1 else 0, domain))
+            qk = list(map(lambda x: 1 if x in col_1.values else 0, domain))
         else:
             dist_1 = gaussian_kde(col_1)
             qk = dist_1.pdf(domain)
 
         # Map extremely small values to non-zero to avoid inf quotients
-        pk = list(map(lambda k: 1e-300 if k < 1e-300 else k, pk))
-        qk = list(map(lambda k: 1e-300 if k < 1e-300 else k, qk))
+        pk = list(map(lambda k: 1e-50 if k < 1e-50 else k, pk))
+        qk = list(map(lambda k: 1e-50 if k < 1e-50 else k, qk))
 
         kl_0 = entropy(qk, pk)
         kl_1 = entropy(pk, qk)
@@ -344,8 +380,8 @@ def kl_diverge(df_train, c_cols, d_cols):
 
         # Map extremely small values to non-zero to avoid inf quotients
         for x in domain:
-            dist_0[x] = 1e-300 if dist_0[x] < 1e-300 else dist_0[x]
-            dist_1[x] = 1e-300 if dist_1[x] < 1e-300 else dist_1[x]
+            dist_0[x] = 1e-50 if dist_0[x] < 1e-50 else dist_0[x]
+            dist_1[x] = 1e-50 if dist_1[x] < 1e-50 else dist_1[x]
         pk = list(map(lambda c: dist_0[c] / sum(dist_0.values()),\
             sorted(domain)))
         qk = list(map(lambda c: dist_1[c] / sum(dist_1.values()),\
@@ -358,7 +394,8 @@ def kl_diverge(df_train, c_cols, d_cols):
 
     return kl_map
 
-def kl_filter(X_train, X_test, kl_map, n=50):
+#def kl_filter(X_train, X_test, kl_map, n=50):
+def kl_filter(df_train, df_test, kl_map, n=50):
     if type(n) == int:
         l = 0
         r = n
@@ -367,18 +404,17 @@ def kl_filter(X_train, X_test, kl_map, n=50):
         r = max(n)
 
     print("== Reducing Features ==")
-    kl_map = list(sorted(zip(kl_map, range(len(kl_map))), reverse=True))
-    X_train_fil = np.ndarray(shape=(X_train.shape[0], r-l), dtype=np.float64)
-    X_test_fil = np.ndarray(shape=(X_test.shape[0], r-l), dtype=np.float64)
+    kl_tup = list(sorted([(kl_map[k], k) for k in kl_map], reverse=True))
+    keep_col = set(t[1] for t in kl_tup[l:r])
+    all_col = set(df_train.columns) & set(df_test.columns)
+    all_col -= set(['ID', 'TARGET'])
 
-    f_idx = 0
-    for i in range(l, r):
-        idx = kl_map[i][1]
-        X_train_fil[:,f_idx] = X_train[:,idx]
-        X_test_fil[:,f_idx] = X_test[:,idx]
-        f_idx += 1
+    rem_col = all_col - keep_col
 
-    return X_train_fil, X_test_fil, kl_map
+    df_train.drop(rem_col, axis=1, inplace=True)
+    df_test.drop(rem_col, axis=1, inplace=True)
+
+    return df_train, df_test
 
 def df_to_ndarray(df, cols):
     return df[cols].values
@@ -424,6 +460,8 @@ def run_classifier(clf, df_train, df_test):
             train_preds *= clf.predict_proba(X_train)[:,1]
             test_preds *= clf.predict_proba(X_test)[:,1]
         cycle += 1
+        del ilc_vsbl
+        del ilc_blnd
 
     train_preds = np.power(train_preds, 1./cycle)
     test_preds = np.power(test_preds, 1./cycle)
