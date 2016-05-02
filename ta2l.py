@@ -44,9 +44,10 @@ from sklearn.metrics import roc_auc_score
 def main():
     #X_train, y_train, X_test, id_test = init()
 
-    #df_train, df_test = init()
-    #df_train, df_test = preprocess(df_train, df_test)
+    df_train, df_test = init()
+    df_train, df_test = preprocess(df_train, df_test)
     
+    '''
     #kl_archive = kl_init((df_train, df_test))
     kl_archive = kl_init()
     df_train = kl_archive[0]
@@ -63,6 +64,7 @@ def main():
     plt.show()
 
     #df_train, df_test = kl_filter(df_train, df_test, kl_map, n=200)
+    '''
 
     '''
     X_train = df_to_ndarray(df_train, df_train.columns[1:-1])
@@ -142,10 +144,8 @@ def main():
     eclf.fit(**(fit_args[0]))
     '''
 
-    '''
-    #eclf = RandomForestClassifier(random_state=1, n_jobs=4)
-    eclf = xgb.XGBClassifier(missing=np.nan, max_depth=7, n_estimators=350,\
-        learning_rate=0.025, nthread=4, subsample=0.6, colsample_bytree=0.85)
+    eclf = xgb.XGBClassifier(missing=np.nan, max_depth=5, n_estimators=350,\
+        learning_rate=0.025, nthread=4, subsample=0.9, colsample_bytree=0.85)
     y_pred = run_classifier(eclf, df_train, df_test)
     id_test = df_to_ndarray(df_test, df_test.columns[0])
 
@@ -154,7 +154,6 @@ def main():
     submission.to_csv("submission.csv", index=False)
 
     print('Completed!')
-    '''
 
 
 def plot_kl(kl_map):
