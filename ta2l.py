@@ -146,6 +146,8 @@ def main():
 
     eclf = xgb.XGBClassifier(missing=np.nan, max_depth=5, n_estimators=350,\
         learning_rate=0.025, nthread=4, subsample=0.9, colsample_bytree=0.85)
+
+    print("== Training classifiers ==")
     y_pred = run_classifier(eclf, df_train, df_test)
     id_test = df_to_ndarray(df_test, df_test.columns[0])
 
